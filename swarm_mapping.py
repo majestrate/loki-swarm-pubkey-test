@@ -12,7 +12,7 @@ import numpy as np
 UINT64_MAX = 2**64 - 1
 NUM_SWARMS = 35
 MERSENNE_TWISTER_BITS = 64
-NUM_PUBKEYS = 10000
+NUM_PUBKEYS = 100000
 
 #  Python uses the Mersenne Twister as the core generator.
 #  It produces 53-bit precision floats and has a period of 2**19937-1.
@@ -48,9 +48,10 @@ def generate_messenger_pubkeys(n):
         pubkeys.append(verifying_key)
     return pubkeys
 
-def get_distance(pubkey, swarm_id):
+def hamming_distance(pubkey, swarm_id):
     pubkey_hex_string = pubkey.to_ascii(encoding="hex")
-    pubkey_binary_string = bin(int(pubkey_hex_string, 16))[2:].zfill(32 * 8)
+    pubkey_long = long(pubkey_hex_string, 16)
+    pubkey_binary_string = bin(pubkey_long)[2:].zfill(32 * 8)
     swarm_binary_string = "{0:0{1}b}".format(swarm_id, 64) * 4 # 64 bits, repeated 4 times
     assert(len(swarm_binary_string) == 8 * 32)
     assert(len(pubkey_binary_string) == 8 * 32)
@@ -59,38 +60,55 @@ def get_distance(pubkey, swarm_id):
     distance = scipy_distance.hamming(pubkey_array_binary, swarm_array_binary)
     return distance
 
-def get_swarm_id_for_pubkey(pubkey, swarm_ids):
-    best = (1024, -1)
+def euclidian_distance(pubkey, swarm_id):
+    pubkey_hex_string = pubkey.to_ascii(encoding="hex")
+    pubkey_long = long(pubkey_hex_string, 16)
+    # pubkey_long is 256 bits (32 bytes)
+    # so expan sw
+    swarm_32bytes = swarm_id
+    swarm_32bytes += swarm_id << 64
+    swarm_32bytes += swarm_id << 128
+    swarm_32bytes += swarm_id << 192
+    return abs(pubkey_long - swarm_32bytes)
+
+def get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_function):
+    best = (float("inf"), -1)
     for swarm_id in swarm_ids:
-        distance = get_distance(pubkey, swarm_id)
+        distance = distance_function(pubkey, swarm_id)
         best = min(best, (distance, swarm_id))
     return best[1]
+
+def process(pubkey, pubkey_index, swarm_ids, distance_function, out_assignd_swarm_indexes, out_swarm_buckets):
+    swarm_id = get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_function)
+    swarm_index = swarm_ids.index(swarm_id)
+    out_assignd_swarm_indexes[pubkey_index] = (swarm_index)
+    out_swarm_buckets[swarm_index] += 1
 
 def main():
     swarm_ids = generate_swarm_ids(NUM_SWARMS)
     pubkeys = generate_messenger_pubkeys(NUM_PUBKEYS)
-    assigned_swarm_indexes = [0] * NUM_PUBKEYS
-    swarms_buckets = [0] * NUM_SWARMS
+    assigned_swarm_indexes = [[0] * NUM_PUBKEYS, [0] * NUM_PUBKEYS]
+    swarms_buckets = [[0] * NUM_SWARMS, [0] * NUM_SWARMS]
     for (idx, pubkey) in enumerate(pubkeys):
-        swarm_id = get_swarm_id_for_pubkey(pubkey, swarm_ids)
-        swarm_index = swarm_ids.index(swarm_id)
-        assigned_swarm_indexes[idx] = (swarm_index)
-        swarms_buckets[swarm_index] += 1
+        process(pubkey, idx, swarm_ids, hamming_distance, assigned_swarm_indexes[0], swarms_buckets[0])
+        process(pubkey, idx, swarm_ids, euclidian_distance, assigned_swarm_indexes[1], swarms_buckets[1])
 
-    ax1 = plt.subplot(2, 1, 1)
-    total = len(np.trim_zeros(assigned_swarm_indexes))
-    print('total assigned: %s' % total)
-    ax1.hist(assigned_swarm_indexes, bins=NUM_SWARMS, histtype='bar', alpha=0.2)
-    # fit
-    ax2 = plt.subplot(2, 1, 2)
-    h = sorted(swarms_buckets)
-    r = max(h) - min(h)
-    ax2.hist(h, density=True, bins=r)
-    mu, std = norm.fit(h)
-    xmin, xmax = plt.xlim()
-    x = np.linspace(xmin, xmax, 100)
-    p = norm.pdf(x, mu, std)
-    ax2.plot(x, p, 'k', linewidth=2)
-    print(np.unique(h, return_counts=True))
+    titles = ['hamming', '1d euclidian']
+    for i in range(2):
+        ax1 = plt.subplot(2, 2, i*2 + 1)
+        total = len(np.trim_zeros(assigned_swarm_indexes[i]))
+        print('total assigned: %s' % total)
+        ax1.hist(assigned_swarm_indexes[i], bins=NUM_SWARMS, histtype='bar', alpha=0.2)
+        # fit
+        ax2 = plt.subplot(2, 2, i*2+2)
+        h = sorted(swarms_buckets[i])
+        r = max(h) - min(h)
+        ax2.hist(h, density=True, bins=r)
+        mu, std = norm.fit(h)
+        xmin, xmax = plt.xlim()
+        x = np.linspace(xmin, xmax, 100)
+        p = norm.pdf(x, mu, std)
+        ax2.plot(x, p, 'k', linewidth=2)
+        print(np.unique(h, return_counts=True))
     plt.show()
 main()
