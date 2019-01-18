@@ -1,4 +1,3 @@
-import random
 import math
 import struct
 import binascii
@@ -9,101 +8,85 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 import numpy as np
 
-UINT64_MAX = 2**64 - 1
+from swarms import generate_swarm_ids
+
 NUM_SWARMS = 35
-MERSENNE_TWISTER_BITS = 64
-NUM_PUBKEYS = 100000
-
-#  Python uses the Mersenne Twister as the core generator.
-#  It produces 53-bit precision floats and has a period of 2**19937-1.
-def mersenne_twister():
-    return random.getrandbits(MERSENNE_TWISTER_BITS)
-
-def uniform_distribution_portable(mt, n):
-    mersenne_twister_max = 2**MERSENNE_TWISTER_BITS - 1
-    secureMax = mersenne_twister_max - mersenne_twister_max % n
-    while True:
-        x = mt()
-        if x < secureMax:
-            break
-    return  x / (secureMax / n)
-
-def get_new_swarm_id(mt, ids):
-    new_id = -1
-    while new_id == -1 or new_id in ids:
-        new_id = uniform_distribution_portable(mt, UINT64_MAX)
-    return long(new_id)
-
-def generate_swarm_ids(n):
-    swarm_ids = []
-    for _ in range(n):
-        new_swarm_id = get_new_swarm_id(mersenne_twister, swarm_ids)
-        swarm_ids.append(new_swarm_id)
-    return swarm_ids
+NUM_PUBKEYS = 10000
+EUCLIDIAN_DISTANCE_REDUCE_PUBKEY_TO_8BYTES = True
 
 def generate_messenger_pubkeys(n):
     pubkeys = []
     for _ in range(n):
         _, verifying_key = ed25519.create_keypair()
-        pubkeys.append(verifying_key)
+        pubkeys.append(verifying_key.to_ascii(encoding="hex"))
     return pubkeys
 
 def hamming_distance(pubkey, swarm_id):
-    pubkey_hex_string = pubkey.to_ascii(encoding="hex")
+    # pub key hex string (32 bytes => 64 chars)
+    pubkey_hex_string = pubkey
+    # pubkey as a long int
     pubkey_long = long(pubkey_hex_string, 16)
+    # pubkey as a string of 1 and 0's
     pubkey_binary_string = bin(pubkey_long)[2:].zfill(32 * 8)
-    swarm_binary_string = "{0:0{1}b}".format(swarm_id, 64) * 4 # 64 bits, repeated 4 times
+    # swarm id as a string of 1 and 0's (duplicate 4 times for a total length of 256 chars)
+    swarm_binary_string = "{0:0{1}b}".format(swarm_id, 64) * 4
     assert(len(swarm_binary_string) == 8 * 32)
     assert(len(pubkey_binary_string) == 8 * 32)
+    # string of 1 and 0's to array of '1' and '0'
     pubkey_array_binary = list(pubkey_binary_string)
     swarm_array_binary = list(swarm_binary_string)
     distance = scipy_distance.hamming(pubkey_array_binary, swarm_array_binary)
     return distance
 
 def euclidian_distance(pubkey, swarm_id):
-    pubkey_hex_string = pubkey.to_ascii(encoding="hex")
-    pubkey_long = long(pubkey_hex_string, 16)
-    # pubkey_long is 256 bits (32 bytes)
-    # so expan sw
-    swarm_32bytes = swarm_id
-    swarm_32bytes += swarm_id << 64
-    swarm_32bytes += swarm_id << 128
-    swarm_32bytes += swarm_id << 192
-    return abs(pubkey_long - swarm_32bytes)
+    pubkey_hex_string = pubkey
+    if (EUCLIDIAN_DISTANCE_REDUCE_PUBKEY_TO_8BYTES):
+        pubkey_hex_array = list(pubkey_hex_string)
+        pubkey_8bytes_string = []
+        for i in range(4):
+            pubkey_8bytes_string.append(''.join(pubkey_hex_array[i*16:i*16+16]))
+        pubkey_8bytes_long = [long(x, 16) for x in pubkey_8bytes_string]
+        pubkey_xor = reduce(lambda x, y: x ^ y, pubkey_8bytes_long, 0)
+        return abs(pubkey_xor - swarm_id)
+    else:
+        # pubkey_long is 256 bits (32 bytes)
+        pubkey_long = long(pubkey_hex_string, 16)
+        swarm_32bytes = swarm_id
+        swarm_32bytes += swarm_id << 64
+        swarm_32bytes += swarm_id << 128
+        swarm_32bytes += swarm_id << 192
+        return abs(pubkey_long - swarm_32bytes)
 
-def get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_function):
-    best = (float("inf"), -1)
+def get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_functions):
+    num_outputs = len(distance_functions)
+    # tuple (distance, id)
+    closest_swarm = [(float("inf"), -1) for _ in range(num_outputs)]
     for swarm_id in swarm_ids:
-        distance = distance_function(pubkey, swarm_id)
-        best = min(best, (distance, swarm_id))
-    return best[1]
+        for (idx, distance_function) in enumerate(distance_functions):
+            distance = distance_function(pubkey, swarm_id)
+            closest_swarm[idx] = min(closest_swarm[idx], (distance, swarm_id))
+    return [x[1] for x in closest_swarm]
 
-def process(pubkey, pubkey_index, swarm_ids, distance_function, out_assignd_swarm_indexes, out_swarm_buckets):
-    swarm_id = get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_function)
-    swarm_index = swarm_ids.index(swarm_id)
-    out_assignd_swarm_indexes[pubkey_index] = (swarm_index)
-    out_swarm_buckets[swarm_index] += 1
+def assign_pubkey_to_swarm(pubkey, pubkey_index, swarm_ids, distance_functions, out_assignd_swarm_indexes, out_swarm_buckets):
+    assigned_swarms = get_swarm_id_for_pubkey(pubkey, swarm_ids, distance_functions)
+    for (idx, swarm_id) in enumerate(assigned_swarms):
+        swarm_index = swarm_ids.index(swarm_id)
+        out_assignd_swarm_indexes[idx][pubkey_index] = swarm_index
+        out_swarm_buckets[idx][swarm_index].append(pubkey)
 
-def main():
-    swarm_ids = generate_swarm_ids(NUM_SWARMS)
-    pubkeys = generate_messenger_pubkeys(NUM_PUBKEYS)
-    assigned_swarm_indexes = [[0] * NUM_PUBKEYS, [0] * NUM_PUBKEYS]
-    swarms_buckets = [[0] * NUM_SWARMS, [0] * NUM_SWARMS]
-    for (idx, pubkey) in enumerate(pubkeys):
-        process(pubkey, idx, swarm_ids, hamming_distance, assigned_swarm_indexes[0], swarms_buckets[0])
-        process(pubkey, idx, swarm_ids, euclidian_distance, assigned_swarm_indexes[1], swarms_buckets[1])
-
+def plot(assigned_swarm_indexes, swarms_buckets):
     titles = ['hamming', '1d euclidian']
     for i in range(2):
         ax1 = plt.subplot(2, 2, i*2 + 1)
         total = len(np.trim_zeros(assigned_swarm_indexes[i]))
         print('total assigned: %s' % total)
         ax1.hist(assigned_swarm_indexes[i], bins=NUM_SWARMS, histtype='bar', alpha=0.2)
-        # fit
         ax2 = plt.subplot(2, 2, i*2+2)
-        h = sorted(swarms_buckets[i])
-        r = max(h) - min(h)
-        ax2.hist(h, density=True, bins=r)
+        swarm_bucket_sizes = map(lambda pubkeys_array: len(pubkeys_array), swarms_buckets[i])
+        h = sorted(swarm_bucket_sizes)
+        bins = max(h) - min(h)
+        ax2.hist(h, density=True, bins=bins)
+        # fit normal distribution
         mu, std = norm.fit(h)
         xmin, xmax = plt.xlim()
         x = np.linspace(xmin, xmax, 100)
@@ -111,4 +94,17 @@ def main():
         ax2.plot(x, p, 'k', linewidth=2)
         print(np.unique(h, return_counts=True))
     plt.show()
+
+def main():
+    swarm_ids = generate_swarm_ids(NUM_SWARMS)
+    pubkeys = generate_messenger_pubkeys(NUM_PUBKEYS)
+    distance_functions = [hamming_distance, euclidian_distance]
+    output_dimensions = len(distance_functions)
+    assigned_swarm_indexes = [[0] * NUM_PUBKEYS for _ in range(output_dimensions)]
+    swarms_buckets = [[[] for _ in range(NUM_SWARMS)] for _ in range(output_dimensions)]
+    for (idx, pubkey) in enumerate(pubkeys):
+        assign_pubkey_to_swarm(pubkey, idx, swarm_ids, distance_functions, assigned_swarm_indexes, swarms_buckets)
+
+    plot(assigned_swarm_indexes, swarms_buckets)
+
 main()
