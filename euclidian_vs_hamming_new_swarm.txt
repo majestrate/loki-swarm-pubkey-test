@@ -1,0 +1,23 @@
+##### euclidian_distance #####
+# mu: 333.3333333333333
+# std: 188.5382955499728
+# min: 57
+# max: 829
+
+##### hamming_distance_hash256 #####
+# mu: 333.3333333333333
+# std: 23.680277776148564
+# min: 282
+# max: 376
+
+# Adding 1 swarm for euclidian_distance
+# new swarm got 630 pubkeys assigned
+# 630 pubkeys assigned to a different swarm
+# 2 swarms lost pubkeys
+# 1 swarms won pubkeys
+
+# Adding 1 swarm for hamming_distance_hash256
+# new swarm got 296 pubkeys assigned
+# 296 pubkeys assigned to a different swarm
+# 30 swarms lost pubkeys
+# 1 swarms won pubkeys
