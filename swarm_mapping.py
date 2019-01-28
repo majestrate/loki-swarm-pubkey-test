@@ -12,6 +12,11 @@ import numpy as np
 
 from swarms import generate_swarm_ids
 
+# python3 compat
+if sys.version_info > (3,):
+    long = int
+
+
 NUM_SWARMS = 31
 NUM_PUBKEYS = 10000
 EUCLIDIAN_DISTANCE_REDUCE_PUBKEY_TO_SWARM_ID = True
@@ -24,7 +29,7 @@ def generate_messenger_pubkeys(n):
         sys.stdout.write("\rGenerating pubkey: %i%% " % pct)
         sys.stdout.flush()
         _, verifying_key = ed25519.create_keypair()
-        pubkeys.append(verifying_key.to_ascii(encoding="hex"))
+        pubkeys.append(verifying_key.to_ascii(encoding="hex").decode('ascii'))
     return pubkeys
 
 def hamming_distance(pubkey, swarm_id):

@@ -1,0 +1,9 @@
+ed25519
+numpy
+scipy
+matplotlib
+ipython
+jupyter
+pandas
+sympy
+nose

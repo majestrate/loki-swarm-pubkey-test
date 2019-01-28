@@ -1,5 +1,13 @@
 import random
 
+import sys
+
+# python3 compat
+if sys.version_info > (3,):
+    long = int
+
+
+
 UINT64_MAX = 2**64 - 1
 MERSENNE_TWISTER_64_BITS = 64
 #  Python uses the Mersenne Twister as the core generator.
